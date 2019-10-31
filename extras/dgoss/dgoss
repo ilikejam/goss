@@ -54,6 +54,19 @@ run(){
     info "Container ID: ${id:0:8}"
 }
 
+copyin(){
+    # Copy in goss
+    cp "${GOSS_PATH}" "$tmp_dir/goss"
+    chmod 755 "$tmp_dir/goss"
+    [[ -e "${GOSS_FILES_PATH}/goss.yaml" ]] && cp "${GOSS_FILES_PATH}/goss.yaml" "$tmp_dir"
+    [[ -e "${GOSS_FILES_PATH}/goss_wait.yaml" ]] && cp "${GOSS_FILES_PATH}/goss_wait.yaml" "$tmp_dir"
+    [[ ! -z "${GOSS_VARS}" ]] && [[ -e "${GOSS_FILES_PATH}/${GOSS_VARS}" ]] && cp "${GOSS_FILES_PATH}/${GOSS_VARS}" "$tmp_dir"
+
+    info "Copy goss files into container"
+    docker cp $tmp_dir/. "${@:2:1}":/goss
+    id="${@:2:1}"
+}
+
 get_docker_file() {
     if docker exec "$id" sh -c "test -e $1" > /dev/null;then
         mkdir -p "${GOSS_FILES_PATH}"
@@ -65,7 +78,6 @@ get_docker_file() {
 # Main
 tmp_dir=$(mktemp -d /tmp/tmp.XXXXXXXXXX)
 chmod 777 "$tmp_dir"
-trap 'ret=$?;cleanup;exit $ret' EXIT
 
 GOSS_PATH="${GOSS_PATH:-$(which goss 2> /dev/null || true)}"
 [[ $GOSS_PATH ]] || { error "Couldn't find goss installation, please set GOSS_PATH to it"; }
@@ -74,8 +86,16 @@ GOSS_PATH="${GOSS_PATH:-$(which goss 2> /dev/null || true)}"
 GOSS_SLEEP=${GOSS_SLEEP:-0.2}
 
 case "$1" in
-    run)
+    join|joinedit)
+        copyin "$@"
+        ;;
+    run|edit)
+        trap 'ret=$?;cleanup;exit $ret' EXIT
         run "$@"
+        ;;
+esac
+case "$1" in
+    join|run)
         if [[ -e "${GOSS_FILES_PATH}/goss_wait.yaml" ]]; then
             info "Found goss_wait.yaml, waiting for it to pass before running tests"
             if [[ -z "${GOSS_VARS}" ]]; then
@@ -100,8 +120,7 @@ case "$1" in
             docker exec "$id" sh -c "/goss/goss -g /goss/goss.yaml --vars='/goss/${GOSS_VARS}' validate $GOSS_OPTS"
         fi
         ;;
-    edit)
-        run "$@"
+    edit|joinedit)
         info "Run goss add/autoadd to add resources"
         docker exec -it "$id" sh -c 'cd /goss; PATH="/goss:$PATH" exec sh'
         get_docker_file "/goss/goss.yaml"
